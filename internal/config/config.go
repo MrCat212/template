@@ -8,9 +8,13 @@ import (
 )
 
 type Config struct {
-	HTTPAddr        string
-	LogLevel        string
-	ShutdownTimeout time.Duration
+	HTTPAddr              string
+	LogLevel              string
+	ShutdownTimeout       time.Duration
+	HTTPReadTimeout       time.Duration
+	HTTPReadHeaderTimeout time.Duration
+	HTTPWriteTimeout      time.Duration
+	HTTPIdleTimeout       time.Duration
 
 	DatabaseURL             string
 	DatabaseMaxConns        int32
@@ -45,6 +49,25 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parse SHUTDOWN_TIMEOUT: %w", err)
 	}
+	cfg.HTTPReadTimeout, err = time.ParseDuration(getEnv("HTTP_READ_TIMEOUT", "10s"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse HTTP_READ_TIMEOUT: %w", err)
+	}
+
+	cfg.HTTPReadHeaderTimeout, err = time.ParseDuration(getEnv("HTTP_READ_HEADER_TIMEOUT", "5s"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse HTTP_READ_HEADER_TIMEOUT: %w", err)
+	}
+
+	cfg.HTTPWriteTimeout, err = time.ParseDuration(getEnv("HTTP_WRITE_TIMEOUT", "15s"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse HTTP_WRITE_TIMEOUT: %w", err)
+	}
+
+	cfg.HTTPIdleTimeout, err = time.ParseDuration(getEnv("HTTP_IDLE_TIMEOUT", "60s"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parse HTTP_IDLE_TIMEOUT: %w", err)
+	}
 
 	maxConns, err := strconv.ParseInt(os.Getenv("DATABASE_MAX_CONNS"), 10, 32)
 	if err != nil {
@@ -74,4 +97,14 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func getEnv(name string, defaultValue string) string {
+	value := os.Getenv(name)
+
+	if value == "" {
+		return defaultValue
+	}
+
+	return value
 }
