@@ -45,7 +45,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 
 	repo := triprepo.NewRepository(pool, cfg.DatabaseQueryTimeout)
-	tx := postgres.NewTxManager(pool)
+	tx := postgres.NewTxManager(pool, cfg.DatabaseQueryTimeout)
 
 	create := createhandler.New(createuc.New(repo, tx), signals)
 	get := gethandler.New(getuc.New(repo))

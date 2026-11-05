@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,50 +14,48 @@ type TxManager interface {
 }
 
 type txManager struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	timeout time.Duration
 }
 
 type txContextKey struct{}
 
-func NewTxManager(pool *pgxpool.Pool) TxManager {
-	return &txManager{
-		pool: pool,
-	}
+func NewTxManager(pool *pgxpool.Pool, timeout time.Duration) TxManager {
+	return &txManager{pool: pool, timeout: timeout}
 }
 
-func (m *txManager) Do(
-	ctx context.Context,
-	fn func(ctx context.Context) error,
-) (err error) {
+func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
 	if txFromContext(ctx) != nil {
 		return fn(ctx)
 	}
 
-	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{
-		IsoLevel: pgx.ReadCommitted,
-	})
+	boundedCtx, cancel := context.WithTimeout(ctx, m.timeout)
+	defer cancel()
+
+	tx, err := m.pool.BeginTx(boundedCtx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 
-	txCtx := context.WithValue(ctx, txContextKey{}, tx)
-
+	committed := false
 	defer func() {
-		if panicValue := recover(); panicValue != nil {
-			_ = tx.Rollback(context.Background())
-			panic(panicValue)
+		if committed {
+			return
 		}
+		rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), m.timeout)
+		defer rollbackCancel()
+		_ = tx.Rollback(rollbackCtx)
 	}()
 
-	if err := fn(txCtx); err != nil {
-		_ = tx.Rollback(context.Background())
+	transactionCtx := context.WithValue(boundedCtx, txContextKey{}, tx)
+	if err := fn(transactionCtx); err != nil {
 		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(boundedCtx); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
 	}
-
+	committed = true
 	return nil
 }
 

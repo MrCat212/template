@@ -75,7 +75,7 @@ func TestRepositoryLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	pool, repo := setupRepository(t)
-	tx := postgres.NewTxManager(pool)
+	tx := postgres.NewTxManager(pool, 3*time.Second)
 
 	newTrip := makeTrip()
 	cleanupTrip(t, pool, newTrip.ID)
@@ -205,7 +205,7 @@ func TestRepositoryRollback(t *testing.T) {
 	ctx := context.Background()
 
 	pool, repo := setupRepository(t)
-	tx := postgres.NewTxManager(pool)
+	tx := postgres.NewTxManager(pool, 3*time.Second)
 
 	newTrip := makeTrip()
 	cleanupTrip(t, pool, newTrip.ID)
@@ -253,5 +253,43 @@ func TestRepositoryNotFound(t *testing.T) {
 
 	if !errors.Is(err, domain.ErrTripNotFound) {
 		t.Errorf("Ожидали ErrTripNotFound, получили %v", err)
+	}
+}
+
+func TestBeginTransactionTimeout(t *testing.T) {
+	url := os.Getenv("DATABASE_URL")
+	if url == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	poolConfig, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poolConfig.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	held, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release()
+
+	manager := postgres.NewTxManager(pool, 150*time.Millisecond)
+	started := time.Now()
+	err = manager.Do(ctx, func(context.Context) error {
+		t.Error("transaction body must not start while pool is busy")
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("begin transaction took too long: %s", elapsed)
 	}
 }

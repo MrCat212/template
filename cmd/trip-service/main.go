@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/MrCat212/template/internal/config"
 	"github.com/MrCat212/template/internal/container"
@@ -33,13 +34,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("start application: %w", err)
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-		defer cancel()
-		if err := app.Close(ctx); err != nil {
-			app.Logger.ErrorContext(ctx, "telemetry shutdown failed", "error", err)
-		}
-	}()
 
 	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -51,22 +45,37 @@ func run() error {
 
 	app.Logger.InfoContext(stopCtx, "server started", "addr", cfg.HTTPAddr)
 
+	var listenErr error
 	select {
 	case <-stopCtx.Done():
-		app.Logger.InfoContext(stopCtx, "server stopping")
+		app.Logger.Info("server stopping")
 	case err := <-serverErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("HTTP server: %w", err)
+			listenErr = fmt.Errorf("HTTP server: %w", err)
 		}
-		return nil
 	}
+
+	watchdog := time.AfterFunc(cfg.ShutdownTimeout, func() {
+		app.Logger.Error("shutdown timeout exceeded; forcing process exit")
+		os.Exit(1)
+	})
+	defer watchdog.Stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+
+	var shutdownErr error
 	if err := app.Server.Shutdown(shutdownCtx); err != nil {
+		app.Logger.ErrorContext(shutdownCtx, "HTTP shutdown failed", "error", err)
 		_ = app.Server.Close()
-		return fmt.Errorf("HTTP shutdown: %w", err)
+		shutdownErr = fmt.Errorf("HTTP shutdown: %w", err)
 	}
-	app.Logger.InfoContext(shutdownCtx, "server stopped")
-	return nil
+
+	closeErr := app.Close(shutdownCtx)
+	if closeErr != nil {
+		app.Logger.ErrorContext(shutdownCtx, "resource shutdown failed", "error", closeErr)
+	}
+	app.Logger.Info("server stopped")
+
+	return errors.Join(listenErr, shutdownErr, closeErr)
 }
