@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"go.uber.org/mock/gomock"
+
 	domain "github.com/MrCat212/template/internal/domain/trip"
 	api "github.com/MrCat212/template/internal/generated"
 	handler "github.com/MrCat212/template/internal/http/trip/create"
 	createuc "github.com/MrCat212/template/internal/usecase/trip/create"
-	"github.com/google/uuid"
-	"go.uber.org/mock/gomock"
 )
 
 func validBody(t *testing.T) string {

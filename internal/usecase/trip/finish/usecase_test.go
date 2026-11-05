@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MrCat212/template/internal/domain/trip"
-	"github.com/MrCat212/template/internal/usecase/trip/finish"
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
+
+	"github.com/MrCat212/template/internal/domain/trip"
+	"github.com/MrCat212/template/internal/usecase/trip/finish"
 )
 
 func newTestTx(ctrl *gomock.Controller) *MocktxManager {
@@ -63,7 +64,6 @@ func TestFinishSuccess(t *testing.T) {
 	u := finish.New(repo, tx)
 
 	result, err := u.Execute(context.Background(), id)
-
 	if err != nil {
 		t.Fatalf("Не ожидали ошибку: %v", err)
 	}

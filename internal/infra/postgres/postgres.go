@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/MrCat212/template/internal/config"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/MrCat212/template/internal/config"
 )
 
 func NewPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {

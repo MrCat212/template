@@ -1,3 +1,5 @@
+//go:build integration
+
 package trip_test
 
 import (
@@ -7,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	domain "github.com/MrCat212/template/internal/domain/trip"
 	"github.com/MrCat212/template/internal/infra/postgres"
 	repository "github.com/MrCat212/template/internal/repository/trip"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func setupRepository(t *testing.T) (*pgxpool.Pool, *repository.Repository) {
@@ -62,7 +65,6 @@ func cleanupTrip(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) {
 			"DELETE FROM trips WHERE id = $1",
 			id,
 		)
-
 		if err != nil {
 			t.Errorf("cleanup trip: %v", err)
 		}
@@ -92,7 +94,6 @@ func TestRepositoryLifecycle(t *testing.T) {
 			newTrip.StartedAt,
 		)
 	})
-
 	if err != nil {
 		t.Fatalf("create trip: %v", err)
 	}
@@ -137,7 +138,6 @@ func TestRepositoryLifecycle(t *testing.T) {
 			now,
 		)
 	})
-
 	if err != nil {
 		t.Fatalf("finish trip: %v", err)
 	}
@@ -162,7 +162,6 @@ func TestRepositoryLifecycle(t *testing.T) {
 		"SELECT COUNT(*) FROM trip_status_history WHERE trip_id = $1",
 		newTrip.ID,
 	).Scan(&historyCount)
-
 	if err != nil {
 		t.Fatal(err)
 	}

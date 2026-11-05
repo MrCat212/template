@@ -5,10 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/MrCat212/template/internal/domain/trip"
-	"github.com/MrCat212/template/internal/usecase/trip/get"
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
+
+	"github.com/MrCat212/template/internal/domain/trip"
+	"github.com/MrCat212/template/internal/usecase/trip/get"
 )
 
 func TestGetSuccess(t *testing.T) {
@@ -31,7 +32,6 @@ func TestGetSuccess(t *testing.T) {
 	usecase := get.New(repo)
 
 	result, err := usecase.Execute(context.Background(), tripID)
-
 	if err != nil {
 		t.Fatalf("Не ожидали ошибку: %v", err)
 	}
@@ -48,6 +48,7 @@ func TestGetSuccess(t *testing.T) {
 		t.Errorf("Ожидали цену %d, получили %d", expectedTrip.Price, result.Price)
 	}
 }
+
 func TestGetNotFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 

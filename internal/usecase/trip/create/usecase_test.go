@@ -5,10 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/MrCat212/template/internal/domain/trip"
-	"github.com/MrCat212/template/internal/usecase/trip/create"
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
+
+	"github.com/MrCat212/template/internal/domain/trip"
+	"github.com/MrCat212/template/internal/usecase/trip/create"
 )
 
 func TestCreateSuccess(t *testing.T) {
@@ -47,7 +48,6 @@ func TestCreateSuccess(t *testing.T) {
 	usecase := create.New(repo, tx)
 
 	result, err := usecase.Execute(context.Background(), input)
-
 	if err != nil {
 		t.Fatalf("Не ожидали ошибку: %v", err)
 	}

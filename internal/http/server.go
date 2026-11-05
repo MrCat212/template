@@ -40,7 +40,7 @@ func (s *Server) FinishTrip(w http.ResponseWriter, r *http.Request, id api.TripI
 	s.finish.Handle(w, r, id)
 }
 
-func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Health(w http.ResponseWriter, _ *http.Request) {
 	response.JSON(w, http.StatusOK, api.HealthResponse{Status: api.Ok})
 }
 

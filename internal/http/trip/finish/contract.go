@@ -5,8 +5,9 @@ package finish
 import (
 	"context"
 
-	domain "github.com/MrCat212/template/internal/domain/trip"
 	"github.com/google/uuid"
+
+	domain "github.com/MrCat212/template/internal/domain/trip"
 )
 
 type usecase interface {

@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"go.uber.org/mock/gomock"
+
 	domain "github.com/MrCat212/template/internal/domain/trip"
 	api "github.com/MrCat212/template/internal/generated"
 	handler "github.com/MrCat212/template/internal/http/trip/get"
-	"github.com/google/uuid"
-	"go.uber.org/mock/gomock"
 )
 
 func TestGetSuccess(t *testing.T) {

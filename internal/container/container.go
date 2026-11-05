@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/MrCat212/template/internal/config"
 	api "github.com/MrCat212/template/internal/generated"
 	httpserver "github.com/MrCat212/template/internal/http"
@@ -16,7 +18,6 @@ import (
 	createuc "github.com/MrCat212/template/internal/usecase/trip/create"
 	finishuc "github.com/MrCat212/template/internal/usecase/trip/finish"
 	getuc "github.com/MrCat212/template/internal/usecase/trip/get"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type App struct {

@@ -7,12 +7,13 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	domain "github.com/MrCat212/template/internal/domain/trip"
-	"github.com/MrCat212/template/internal/infra/postgres"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	domain "github.com/MrCat212/template/internal/domain/trip"
+	"github.com/MrCat212/template/internal/infra/postgres"
 )
 
 type Repository struct {

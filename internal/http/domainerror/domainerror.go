@@ -56,6 +56,6 @@ func Write(w http.ResponseWriter, r *http.Request, err error) {
 	response.Problem(w, status, body)
 }
 
-func HandleAPIError(w http.ResponseWriter, r *http.Request, err error) {
+func HandleAPIError(w http.ResponseWriter, r *http.Request, _ error) {
 	Write(w, r, &domain.ValidationError{Field: "request", Reason: "invalid URL parameter"})
 }

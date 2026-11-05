@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/MrCat212/template/internal/domain/trip"
 	"github.com/google/uuid"
+
+	"github.com/MrCat212/template/internal/domain/trip"
 )
 
 type Input struct {

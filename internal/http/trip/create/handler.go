@@ -6,13 +6,14 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	domain "github.com/MrCat212/template/internal/domain/trip"
 	api "github.com/MrCat212/template/internal/generated"
 	"github.com/MrCat212/template/internal/http/domainerror"
 	"github.com/MrCat212/template/internal/http/response"
 	"github.com/MrCat212/template/internal/http/trip/convert"
 	usecasecreate "github.com/MrCat212/template/internal/usecase/trip/create"
-	"github.com/google/uuid"
 )
 
 type Handler struct {
