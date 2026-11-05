@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/MrCat212/template/internal/config"
 	"github.com/MrCat212/template/internal/database"
@@ -28,13 +29,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
 	}
-	defer pool.Close()
 
 	repository := trip.NewRepository(pool, cfg.DatabaseQueryTimeout)
-	txManager := database.NewTxManager(pool)
-
+	txManager := database.NewTxManager(pool, cfg.DatabaseQueryTimeout)
 	service := trip.NewService(repository, txManager)
-
 	handler := httpapi.NewHandler(service, pool, cfg.DatabaseQueryTimeout)
 
 	server := &http.Server{
@@ -48,15 +46,10 @@ func main() {
 		IdleTimeout:       cfg.HTTPIdleTimeout,
 	}
 
-	stopCtx, stop := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
+	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	serverErr := make(chan error, 1)
-
 	go func() {
 		log.Printf("HTTP server started on %s", cfg.HTTPAddr)
 		serverErr <- server.ListenAndServe()
@@ -65,24 +58,25 @@ func main() {
 	select {
 	case <-stopCtx.Done():
 		log.Println("stopping HTTP server")
-
 	case err := <-serverErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("HTTP server error: %v", err)
 		}
-		return
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(
-		context.Background(),
-		cfg.ShutdownTimeout,
-	)
-	defer cancel()
+	watchdog := time.AfterFunc(cfg.ShutdownTimeout, func() {
+		log.Println("shutdown timeout exceeded; forcing process exit")
+		os.Exit(1)
+	})
 
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown error: %v", err)
 		_ = server.Close()
 	}
+	cancel()
 
+	pool.Close()
+	watchdog.Stop()
 	log.Println("HTTP server stopped")
 }
