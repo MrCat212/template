@@ -8,6 +8,7 @@ run:
 
 generate:
 	go tool oapi-codegen -config oapi-codegen.yaml contracts/openapi/trip-service.openapi.yaml
+	go generate ./internal/usecase/... ./internal/http/trip/...
 
 test:
 	go test -race -cover ./...
