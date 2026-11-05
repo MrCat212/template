@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,41 +15,58 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "trip-service").Error(
+			"service stopped with error", "error", err,
+		)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	app, err := container.New(context.Background(), cfg)
 	if err != nil {
-		log.Fatalf("start application: %v", err)
+		return fmt.Errorf("start application: %w", err)
 	}
-	defer app.Close()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if err := app.Close(ctx); err != nil {
+			app.Logger.ErrorContext(ctx, "telemetry shutdown failed", "error", err)
+		}
+	}()
 
 	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	serverErr := make(chan error, 1)
 	go func() {
-		log.Printf("HTTP server started on %s", cfg.HTTPAddr)
 		serverErr <- app.Server.ListenAndServe()
 	}()
 
+	app.Logger.InfoContext(stopCtx, "server started", "addr", cfg.HTTPAddr)
+
 	select {
 	case <-stopCtx.Done():
-		log.Println("stopping HTTP server")
+		app.Logger.InfoContext(stopCtx, "server stopping")
 	case err := <-serverErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("HTTP server error: %v", err)
+			return fmt.Errorf("HTTP server: %w", err)
 		}
-		return
+		return nil
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := app.Server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown error: %v", err)
 		_ = app.Server.Close()
+		return fmt.Errorf("HTTP shutdown: %w", err)
 	}
-	log.Println("HTTP server stopped")
+	app.Logger.InfoContext(shutdownCtx, "server stopped")
+	return nil
 }

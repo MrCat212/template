@@ -18,10 +18,15 @@ import (
 
 type Handler struct {
 	usecase usecase
+	events  eventRecorder
 }
 
-func New(uc usecase) *Handler {
-	return &Handler{usecase: uc}
+func New(uc usecase, events ...eventRecorder) *Handler {
+	h := &Handler{usecase: uc}
+	if len(events) > 0 {
+		h.events = events[0]
+	}
+	return h
 }
 
 func (h *Handler) Handle(w http.ResponseWriter, r *http.Request, _ api.CreateTripParams) {
@@ -82,6 +87,10 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request, _ api.CreateTri
 	if err != nil {
 		domainerror.Write(w, r, err)
 		return
+	}
+
+	if h.events != nil {
+		h.events.Created(r.Context(), created.ID)
 	}
 
 	w.Header().Set("Location", "/api/v1/trips/"+created.ID.String())

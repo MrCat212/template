@@ -15,6 +15,7 @@ import (
 
 	trip "github.com/MrCat212/template/internal/domain/trip"
 	create "github.com/MrCat212/template/internal/usecase/trip/create"
+	uuid "github.com/google/uuid"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -55,4 +56,40 @@ func (m *Mockusecase) Execute(ctx context.Context, input create.Input) (trip.Tri
 func (mr *MockusecaseMockRecorder) Execute(ctx, input any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*Mockusecase)(nil).Execute), ctx, input)
+}
+
+// MockeventRecorder is a mock of eventRecorder interface.
+type MockeventRecorder struct {
+	ctrl     *gomock.Controller
+	recorder *MockeventRecorderMockRecorder
+	isgomock struct{}
+}
+
+// MockeventRecorderMockRecorder is the mock recorder for MockeventRecorder.
+type MockeventRecorderMockRecorder struct {
+	mock *MockeventRecorder
+}
+
+// NewMockeventRecorder creates a new mock instance.
+func NewMockeventRecorder(ctrl *gomock.Controller) *MockeventRecorder {
+	mock := &MockeventRecorder{ctrl: ctrl}
+	mock.recorder = &MockeventRecorderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockeventRecorder) EXPECT() *MockeventRecorderMockRecorder {
+	return m.recorder
+}
+
+// Created mocks base method.
+func (m *MockeventRecorder) Created(ctx context.Context, id uuid.UUID) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Created", ctx, id)
+}
+
+// Created indicates an expected call of Created.
+func (mr *MockeventRecorderMockRecorder) Created(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Created", reflect.TypeOf((*MockeventRecorder)(nil).Created), ctx, id)
 }

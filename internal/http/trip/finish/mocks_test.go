@@ -56,3 +56,39 @@ func (mr *MockusecaseMockRecorder) Execute(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Execute", reflect.TypeOf((*Mockusecase)(nil).Execute), ctx, id)
 }
+
+// MockeventRecorder is a mock of eventRecorder interface.
+type MockeventRecorder struct {
+	ctrl     *gomock.Controller
+	recorder *MockeventRecorderMockRecorder
+	isgomock struct{}
+}
+
+// MockeventRecorderMockRecorder is the mock recorder for MockeventRecorder.
+type MockeventRecorderMockRecorder struct {
+	mock *MockeventRecorder
+}
+
+// NewMockeventRecorder creates a new mock instance.
+func NewMockeventRecorder(ctrl *gomock.Controller) *MockeventRecorder {
+	mock := &MockeventRecorder{ctrl: ctrl}
+	mock.recorder = &MockeventRecorderMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockeventRecorder) EXPECT() *MockeventRecorderMockRecorder {
+	return m.recorder
+}
+
+// Completed mocks base method.
+func (m *MockeventRecorder) Completed(ctx context.Context, id uuid.UUID) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Completed", ctx, id)
+}
+
+// Completed indicates an expected call of Completed.
+func (mr *MockeventRecorderMockRecorder) Completed(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Completed", reflect.TypeOf((*MockeventRecorder)(nil).Completed), ctx, id)
+}

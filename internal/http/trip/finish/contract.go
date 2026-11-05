@@ -13,3 +13,7 @@ import (
 type usecase interface {
 	Execute(ctx context.Context, id uuid.UUID) (domain.Trip, error)
 }
+
+type eventRecorder interface {
+	Completed(ctx context.Context, id uuid.UUID)
+}

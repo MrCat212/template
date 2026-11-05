@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/MrCat212/template/internal/config"
@@ -14,6 +15,11 @@ func NewPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse database config: %w", err)
 	}
+
+	poolConfig.ConnConfig.Tracer = otelpgx.NewTracer(
+		otelpgx.WithDisableSQLStatementInAttributes(),
+		otelpgx.WithMetricOperationName(otelpgx.SQLOperationName),
+	)
 
 	poolConfig.MaxConns = cfg.DatabaseMaxConns
 	poolConfig.MinConns = cfg.DatabaseMinConns
