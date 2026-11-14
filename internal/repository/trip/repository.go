@@ -68,6 +68,7 @@ func (r *Repository) Create(ctx context.Context, trip domain.Trip) error {
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trips")
 
 	db := postgres.GetDBTX(queryCtx, r.pool)
 
@@ -112,6 +113,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (domain.Trip, er
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trips")
 
 	db := postgres.GetDBTX(queryCtx, r.pool)
 
@@ -178,6 +180,7 @@ func (r *Repository) Finish(
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trips")
 
 	db := postgres.GetDBTX(queryCtx, r.pool)
 
@@ -252,6 +255,7 @@ func (r *Repository) AddStatusHistory(
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trip_status_history")
 
 	db := postgres.GetDBTX(queryCtx, r.pool)
 

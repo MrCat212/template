@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/instrumentation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -77,6 +78,13 @@ func New(ctx context.Context, rawLevel string) (*Telemetry, error) {
 	meter := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter, sdkmetric.WithInterval(5*time.Second))),
+		sdkmetric.WithView(sdkmetric.NewView(
+			sdkmetric.Instrument{
+				Name:  "db.client.operation.duration",
+				Scope: instrumentation.Scope{Name: "github.com/exaring/otelpgx"},
+			},
+			sdkmetric.Stream{Aggregation: sdkmetric.AggregationDrop{}},
+		)),
 	)
 
 	t := &Telemetry{Logger: logger, tracer: tracer, meter: meter}

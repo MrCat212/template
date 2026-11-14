@@ -88,6 +88,10 @@ func Tracing() func(http.Handler) http.Handler {
 		observed := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			recorder := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			defer func() {
+				panicValue := recover()
+				if panicValue != nil && !recorder.written {
+					recorder.status = http.StatusInternalServerError
+				}
 				route := Route(r)
 				span := trace.SpanFromContext(r.Context())
 				span.SetName(r.Method + " " + route)
@@ -98,6 +102,9 @@ func Tracing() func(http.Handler) http.Handler {
 				if recorder.status >= http.StatusInternalServerError {
 					span.SetStatus(codes.Error, http.StatusText(recorder.status))
 					span.SetAttributes(attribute.String("error.type", "http.server"))
+				}
+				if panicValue != nil {
+					panic(panicValue)
 				}
 			}()
 			next.ServeHTTP(recorder, r)
@@ -117,6 +124,10 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 			started := time.Now()
 			recorder := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			defer func() {
+				panicValue := recover()
+				if panicValue != nil && !recorder.written {
+					recorder.status = http.StatusInternalServerError
+				}
 				level := slog.LevelInfo
 				if recorder.status >= http.StatusInternalServerError {
 					level = slog.LevelError
@@ -127,6 +138,9 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 					slog.Int("status", recorder.status),
 					slog.Float64("duration_ms", float64(time.Since(started).Microseconds())/1e3),
 				)
+				if panicValue != nil {
+					panic(panicValue)
+				}
 			}()
 			next.ServeHTTP(recorder, r)
 		})
@@ -146,7 +160,14 @@ func Metrics(metrics httpMetrics) func(http.Handler) http.Handler {
 			metrics.HTTPStarted(r.Context(), r.Method, route)
 			recorder := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			defer func() {
+				panicValue := recover()
+				if panicValue != nil && !recorder.written {
+					recorder.status = http.StatusInternalServerError
+				}
 				metrics.HTTPFinished(r.Context(), r.Method, route, recorder.status, time.Since(started))
+				if panicValue != nil {
+					panic(panicValue)
+				}
 			}()
 			next.ServeHTTP(recorder, r)
 		})
