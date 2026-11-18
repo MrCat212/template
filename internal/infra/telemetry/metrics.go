@@ -28,6 +28,11 @@ func (t *Telemetry) HTTPFinished(ctx context.Context, method, route string, stat
 	))
 }
 
+// PositionSaved records a successfully committed coordinate.
+func (t *Telemetry) PositionSaved(ctx context.Context) {
+	t.positionSaved.Add(ctx, 1)
+}
+
 func (t *Telemetry) Created(ctx context.Context, id uuid.UUID) {
 	t.created.Add(ctx, 1)
 	t.Logger.InfoContext(ctx, "trip created", "trip_id", id.String())

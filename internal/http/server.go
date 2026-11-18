@@ -10,6 +10,8 @@ import (
 	createhandler "github.com/MrCat212/template/internal/http/trip/create"
 	finishhandler "github.com/MrCat212/template/internal/http/trip/finish"
 	gethandler "github.com/MrCat212/template/internal/http/trip/get"
+	positioncreatehandler "github.com/MrCat212/template/internal/http/trip/positions/create"
+	positionlisthandler "github.com/MrCat212/template/internal/http/trip/positions/list"
 )
 
 type readinessChecker interface {
@@ -17,15 +19,17 @@ type readinessChecker interface {
 }
 
 type Server struct {
-	create  *createhandler.Handler
-	get     *gethandler.Handler
-	finish  *finishhandler.Handler
-	ready   readinessChecker
-	timeout time.Duration
+	create         *createhandler.Handler
+	get            *gethandler.Handler
+	finish         *finishhandler.Handler
+	positionCreate *positioncreatehandler.Handler
+	positionList   *positionlisthandler.Handler
+	ready          readinessChecker
+	timeout        time.Duration
 }
 
-func New(create *createhandler.Handler, get *gethandler.Handler, finish *finishhandler.Handler, ready readinessChecker, timeout time.Duration) *Server {
-	return &Server{create: create, get: get, finish: finish, ready: ready, timeout: timeout}
+func New(create *createhandler.Handler, get *gethandler.Handler, finish *finishhandler.Handler, positionCreate *positioncreatehandler.Handler, positionList *positionlisthandler.Handler, ready readinessChecker, timeout time.Duration) *Server {
+	return &Server{create: create, get: get, finish: finish, positionCreate: positionCreate, positionList: positionList, ready: ready, timeout: timeout}
 }
 
 func (s *Server) CreateTrip(w http.ResponseWriter, r *http.Request, params api.CreateTripParams) {
@@ -38,6 +42,14 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request, id api.TripId) 
 
 func (s *Server) FinishTrip(w http.ResponseWriter, r *http.Request, id api.TripId) {
 	s.finish.Handle(w, r, id)
+}
+
+func (s *Server) CreateTripPosition(w http.ResponseWriter, r *http.Request, id api.TripId) {
+	s.positionCreate.Handle(w, r, id)
+}
+
+func (s *Server) ListTripPositions(w http.ResponseWriter, r *http.Request, id api.TripId) {
+	s.positionList.Handle(w, r, id)
 }
 
 func (s *Server) Health(w http.ResponseWriter, _ *http.Request) {

@@ -65,6 +65,9 @@ func Route(r *http.Request) string {
 		if len(parts) == 5 && parts[4] == "finish" {
 			return "/api/v1/trips/{tripId}/finish"
 		}
+		if len(parts) == 5 && parts[4] == "positions" {
+			return "/api/v1/trips/{tripId}/positions"
+		}
 	}
 	return "unmatched"
 }
