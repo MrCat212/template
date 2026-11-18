@@ -22,6 +22,13 @@ type Config struct {
 	DatabaseMaxConnLifetime time.Duration
 	DatabaseConnectTimeout  time.Duration
 	DatabaseQueryTimeout    time.Duration
+
+	PositionCheckInterval time.Duration
+	PositionStaleAfter    time.Duration
+	PositionWorkers       int
+	PositionQueueSize     int
+	PushHTTPURL           string
+	PushRequestTimeout    time.Duration
 }
 
 func Load() (Config, error) {
@@ -96,7 +103,40 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("parse DATABASE_QUERY_TIMEOUT: %w", err)
 	}
 
+	cfg.PositionCheckInterval, err = time.ParseDuration(getEnv("POSITION_CHECK_INTERVAL", "30s"))
+	if err != nil || cfg.PositionCheckInterval <= 0 {
+		return Config{}, fmt.Errorf("POSITION_CHECK_INTERVAL must be a positive duration")
+	}
+	cfg.PositionStaleAfter, err = time.ParseDuration(getEnv("POSITION_STALE_AFTER", "60s"))
+	if err != nil || cfg.PositionStaleAfter <= 0 {
+		return Config{}, fmt.Errorf("POSITION_STALE_AFTER must be a positive duration")
+	}
+	cfg.PositionWorkers, err = positiveInt("POSITION_WORKERS", "4")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PositionQueueSize, err = positiveInt("POSITION_QUEUE_SIZE", "100")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PushRequestTimeout, err = time.ParseDuration(getEnv("PUSH_REQUEST_TIMEOUT", "1s"))
+	if err != nil || cfg.PushRequestTimeout <= 0 {
+		return Config{}, fmt.Errorf("PUSH_REQUEST_TIMEOUT must be a positive duration")
+	}
+	cfg.PushHTTPURL = os.Getenv("PUSH_HTTP_URL")
+	if cfg.PushHTTPURL == "" {
+		return Config{}, fmt.Errorf("PUSH_HTTP_URL is required")
+	}
+
 	return cfg, nil
+}
+
+func positiveInt(name, fallback string) (int, error) {
+	n, err := strconv.Atoi(getEnv(name, fallback))
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return n, nil
 }
 
 func getEnv(name, defaultValue string) string {

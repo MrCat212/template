@@ -21,6 +21,7 @@ func TestRoute(t *testing.T) {
 		{"/api/v1/trips", "/api/v1/trips"},
 		{"/api/v1/trips/123", "/api/v1/trips/{tripId}"},
 		{"/api/v1/trips/123/finish", "/api/v1/trips/{tripId}/finish"},
+		{"/api/v1/trips/123/positions", "/api/v1/trips/{tripId}/positions"},
 		{"/something-else", "unmatched"},
 	}
 	for _, test := range cases {

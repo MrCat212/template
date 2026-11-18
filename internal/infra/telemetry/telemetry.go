@@ -23,13 +23,14 @@ import (
 )
 
 type Telemetry struct {
-	Logger    *slog.Logger
-	tracer    *sdktrace.TracerProvider
-	meter     *sdkmetric.MeterProvider
-	duration  metric.Float64Histogram
-	active    metric.Int64UpDownCounter
-	created   metric.Int64Counter
-	completed metric.Int64Counter
+	Logger        *slog.Logger
+	tracer        *sdktrace.TracerProvider
+	meter         *sdkmetric.MeterProvider
+	duration      metric.Float64Histogram
+	active        metric.Int64UpDownCounter
+	created       metric.Int64Counter
+	completed     metric.Int64Counter
+	positionSaved metric.Int64Counter
 }
 
 func New(ctx context.Context, rawLevel string) (*Telemetry, error) {
@@ -109,6 +110,12 @@ func New(ctx context.Context, rawLevel string) (*Telemetry, error) {
 	if err != nil {
 		_ = t.Shutdown(ctx)
 		return nil, fmt.Errorf("create trip completed metric: %w", err)
+	}
+
+	t.positionSaved, err = instruments.Int64Counter("tripgo.positions.saved", metric.WithUnit("{position}"))
+	if err != nil {
+		_ = t.Shutdown(ctx)
+		return nil, fmt.Errorf("create position saved metric: %w", err)
 	}
 
 	otel.SetTracerProvider(tracer)
