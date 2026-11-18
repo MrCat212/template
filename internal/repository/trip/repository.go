@@ -7,11 +7,13 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
-	"github.com/MrCat212/template/internal/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	domain "github.com/MrCat212/template/internal/domain/trip"
+	"github.com/MrCat212/template/internal/infra/postgres"
 )
 
 type Repository struct {
@@ -29,7 +31,7 @@ func NewRepository(
 	}
 }
 
-func (r *Repository) Create(ctx context.Context, trip Trip) error {
+func (r *Repository) Create(ctx context.Context, trip domain.Trip) error {
 	query, args, err := sq.
 		Insert("trips").
 		Columns(
@@ -66,8 +68,9 @@ func (r *Repository) Create(ctx context.Context, trip Trip) error {
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trips")
 
-	db := database.GetDBTX(queryCtx, r.pool)
+	db := postgres.GetDBTX(queryCtx, r.pool)
 
 	_, err = db.Exec(queryCtx, query, args...)
 	if err != nil {
@@ -76,7 +79,7 @@ func (r *Repository) Create(ctx context.Context, trip Trip) error {
 		if errors.As(err, &pgErr) &&
 			pgErr.Code == "23505" &&
 			pgErr.ConstraintName == "trips_active_driver_unique" {
-			return ErrDriverBusy
+			return domain.ErrDriverBusy
 		}
 
 		return fmt.Errorf("create trip: %w", err)
@@ -85,7 +88,7 @@ func (r *Repository) Create(ctx context.Context, trip Trip) error {
 	return nil
 }
 
-func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (Trip, error) {
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (domain.Trip, error) {
 	query, args, err := sq.
 		Select(
 			"id",
@@ -105,15 +108,16 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (Trip, error) {
 		PlaceholderFormat(sq.Dollar).
 		ToSql()
 	if err != nil {
-		return Trip{}, fmt.Errorf("build get trip query: %w", err)
+		return domain.Trip{}, fmt.Errorf("build get trip query: %w", err)
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trips")
 
-	db := database.GetDBTX(queryCtx, r.pool)
+	db := postgres.GetDBTX(queryCtx, r.pool)
 
-	var trip Trip
+	var trip domain.Trip
 
 	err = db.QueryRow(queryCtx, query, args...).Scan(
 		&trip.ID,
@@ -130,11 +134,11 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (Trip, error) {
 	)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Trip{}, ErrTripNotFound
+		return domain.Trip{}, domain.ErrTripNotFound
 	}
 
 	if err != nil {
-		return Trip{}, fmt.Errorf("get trip: %w", err)
+		return domain.Trip{}, fmt.Errorf("get trip: %w", err)
 	}
 
 	return trip, nil
@@ -144,15 +148,15 @@ func (r *Repository) Finish(
 	ctx context.Context,
 	id uuid.UUID,
 	finishedAt time.Time,
-) (Trip, error) {
+) (domain.Trip, error) {
 	query, args, err := sq.
 		Update("trips").
-		Set("status", StatusCompleted).
+		Set("status", domain.StatusCompleted).
 		Set("finished_at", finishedAt).
 		Set("updated_at", finishedAt).
 		Where(sq.Eq{
 			"id":     id,
-			"status": StatusActive,
+			"status": domain.StatusActive,
 		}).
 		Suffix(`
 			RETURNING
@@ -171,15 +175,16 @@ func (r *Repository) Finish(
 		PlaceholderFormat(sq.Dollar).
 		ToSql()
 	if err != nil {
-		return Trip{}, fmt.Errorf("build finish trip query: %w", err)
+		return domain.Trip{}, fmt.Errorf("build finish trip query: %w", err)
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trips")
 
-	db := database.GetDBTX(queryCtx, r.pool)
+	db := postgres.GetDBTX(queryCtx, r.pool)
 
-	var trip Trip
+	var trip domain.Trip
 
 	err = db.QueryRow(queryCtx, query, args...).Scan(
 		&trip.ID,
@@ -198,21 +203,21 @@ func (r *Repository) Finish(
 	if errors.Is(err, pgx.ErrNoRows) {
 		existingTrip, getErr := r.GetByID(queryCtx, id)
 
-		if errors.Is(getErr, ErrTripNotFound) {
-			return Trip{}, ErrTripNotFound
+		if errors.Is(getErr, domain.ErrTripNotFound) {
+			return domain.Trip{}, domain.ErrTripNotFound
 		}
 
 		if getErr != nil {
-			return Trip{}, fmt.Errorf("check trip after finish: %w", getErr)
+			return domain.Trip{}, fmt.Errorf("check trip after finish: %w", getErr)
 		}
 
-		if existingTrip.Status == StatusCompleted {
-			return Trip{}, ErrTripCompleted
+		if existingTrip.Status == domain.StatusCompleted {
+			return domain.Trip{}, domain.ErrTripCompleted
 		}
 	}
 
 	if err != nil {
-		return Trip{}, fmt.Errorf("finish trip: %w", err)
+		return domain.Trip{}, fmt.Errorf("finish trip: %w", err)
 	}
 
 	return trip, nil
@@ -221,8 +226,8 @@ func (r *Repository) Finish(
 func (r *Repository) AddStatusHistory(
 	ctx context.Context,
 	tripID uuid.UUID,
-	fromStatus *Status,
-	toStatus Status,
+	fromStatus *domain.Status,
+	toStatus domain.Status,
 	reason string,
 	changedAt time.Time,
 ) error {
@@ -250,8 +255,9 @@ func (r *Repository) AddStatusHistory(
 
 	queryCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+	queryCtx = postgres.WithCollection(queryCtx, "trip_status_history")
 
-	db := database.GetDBTX(queryCtx, r.pool)
+	db := postgres.GetDBTX(queryCtx, r.pool)
 
 	_, err = db.Exec(queryCtx, query, args...)
 	if err != nil {

@@ -99,7 +99,7 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-func getEnv(name string, defaultValue string) string {
+func getEnv(name, defaultValue string) string {
 	value := os.Getenv(name)
 
 	if value == "" {

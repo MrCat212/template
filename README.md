@@ -186,3 +186,132 @@ make test
 /ready дополнительно проверяет доступность PostgreSQL.
 
 Если база недоступна, /ready возвращает 503 Service Unavailable.
+
+---
+
+## Лабораторная работа 2. Архитектура, качество кода и observability
+
+Во второй лабораторной внешний HTTP API остался прежним, но реализация
+разделена на слои, добавлены тесты, линтер и наблюдаемость через OpenTelemetry.
+Новые HTTP-ручки и миграции для этой работы не добавлялись.
+
+### Архитектура
+
+```text
+HTTP-клиент
+    |
+    v
+internal/http/trip/{create,get,finish}
+    |
+    v
+internal/usecase/trip/{create,get,finish}
+    |                         \
+    v                          v
+internal/domain/trip     интерфейсы зависимостей
+                               |
+                               v
+                      internal/repository/trip
+                               |
+                               v
+                       internal/infra/postgres
+                               |
+                               v
+                           PostgreSQL
+```
+
+- `cmd/trip-service/main.go` загружает конфигурацию, запускает сервер и
+  обеспечивает корректную остановку по сигналам.
+- `internal/container` создаёт конкретные зависимости и соединяет их.
+- `internal/domain/trip` содержит модель поездки, статусы, переход `Finish`,
+  ошибки и тип ошибки валидации; не зависит от HTTP и БД.
+- `internal/usecase/trip/{create,get,finish}` реализует сценарии приложения.
+  Сценарии не знают о реализации PostgreSQL и HTTP.
+- `internal/http/trip/{create,get,finish}` разбирает запросы и возвращает
+  ответы по OpenAPI-контракту. `internal/http/domainerror` централизованно
+  преобразует доменные ошибки в HTTP Problem по RFC 9457.
+- `internal/repository/trip` реализует сохранение и чтение поездок в БД;
+  `internal/infra/postgres` управляет пулом соединений и транзакциями.
+- `internal/infra/telemetry` настраивает OpenTelemetry, JSON-логи `slog`
+  и метрики. `internal/http/middleware` обрабатывает входящие запросы.
+
+Зависимости направлены от внешних слоёв к внутренним. Узкие интерфейсы
+объявлены в `contract.go` на стороне **потребителя** (usecase или обработчика),
+а не в реализации репозитория. Это позволяет подменять зависимости моками
+через `gomock` и добавлять другие транспорты без изменения домена.
+
+### Принятые решения
+
+- Создание поездки и запись первого статуса выполняются в одной транзакции.
+  При ошибке обе операции откатываются.
+- Уникальный частичный индекс PostgreSQL запрещает две активные поездки
+  у одного водителя. Ошибка преобразуется в `409 driver_busy`.
+- Завершение поездки — доменный переход `active` → `completed` с условным
+  `UPDATE` и записью истории внутри транзакции. Повторная попытка даёт
+  `409 trip_completed`.
+- Ошибки валидации преобразуются в `400 invalid_request`, отсутствие поездки
+  — в `404 trip_not_found`, неожиданные ошибки — в `500 internal_error` без
+  раскрытия внутреннего текста исключения.
+- Для HTTP используется цепочка middleware
+  `Recover → Tracing → Logging → Metrics → router`.
+- Каждый HTTP-запрос логируется один раз после ответа, бизнес-события
+  создания и завершения поездки записываются отдельно.
+
+### Запуск лабораторной работы 2
+
+Требуются Go, Docker, `tripgoctl` и `golangci-lint` версии 2.
+
+```bash
+tripgoctl cluster start
+tripgoctl environment start
+tripgoctl connect
+make migrate
+make run
+```
+
+`tripgoctl connect` создаёт локальный `.env` с адресами PostgreSQL и
+OTLP-коллектора. Секреты в репозиторий не добавляются. Перечень переменных
+находится в `.env.example`. Для OpenTelemetry используются
+`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`,
+`OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_RESOURCE_ATTRIBUTES` и
+`OTEL_TRACES_SAMPLER`.
+
+### Генерация кода и проверка
+
+```bash
+make generate
+make lint
+make test
+make test-integration
+```
+
+- `make generate` обновляет OpenAPI-код и тестовые моки из `contract.go`.
+  Сгенерированные моки хранятся рядом с тестами.
+- `make lint` запускает `golangci-lint` с `.golangci.yml` преподавателя.
+- `make test` запускает unit-тесты с `-race` и печатает покрытие.
+- `make test-integration` дополнительно запускает тесты PostgreSQL,
+  помеченные `//go:build integration`; нужен запущенный PostgreSQL и `.env`.
+- В домене и во всех трёх usecase покрытие превышает требуемые 50%.
+
+### Наблюдаемость
+
+Сервис отправляет трейсы и метрики через OTLP-коллектор. Трейсы просматриваются
+в Jaeger, метрики — в Prometheus/Grafana; актуальные адреса выдаёт
+`tripgoctl connect`.
+
+В каждом логе запроса присутствуют `trace_id` и `span_id`, позволяющие найти
+соответствующий трейс в Jaeger. HTTP-спаны содержат вложенные операции
+PostgreSQL (`BEGIN`, `INSERT`, `SELECT`, `UPDATE`, `COMMIT`). Метки маршрутов
+содержат шаблон (`/api/v1/trips/{tripId}`), а не конкретный UUID.
+
+Обязательные метрики лабораторной работы 2:
+
+| Метрика | Назначение |
+|---|---|
+| `http.server.request.duration` | Гистограмма времени HTTP-ответов |
+| `http.server.active_requests` | Количество текущих HTTP-запросов |
+| `db.client.operation.duration` | Гистограмма длительности запросов к PostgreSQL |
+| `tripgo.trips.created` | Счётчик созданных поездок |
+| `tripgo.trips.completed` | Счётчик завершённых поездок |
+
+Скриншоты трассы HTTP + PostgreSQL из Jaeger и метрик из Grafana
+прикладываются **в описание Pull Request** `homework/02` → `main` своего форка.

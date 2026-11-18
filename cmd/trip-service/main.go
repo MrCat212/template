@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,39 +12,27 @@ import (
 	"time"
 
 	"github.com/MrCat212/template/internal/config"
-	"github.com/MrCat212/template/internal/database"
-	api "github.com/MrCat212/template/internal/generated"
-	"github.com/MrCat212/template/internal/httpapi"
-	"github.com/MrCat212/template/internal/trip"
+	"github.com/MrCat212/template/internal/container"
 )
 
 func main() {
-	ctx := context.Background()
+	if err := run(); err != nil {
+		slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "trip-service").Error(
+			"service stopped with error", "error", err,
+		)
+		os.Exit(1)
+	}
+}
 
+func run() error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 
-	pool, err := database.NewPool(ctx, cfg)
+	app, err := container.New(context.Background(), cfg)
 	if err != nil {
-		log.Fatalf("connect to database: %v", err)
-	}
-
-	repository := trip.NewRepository(pool, cfg.DatabaseQueryTimeout)
-	txManager := database.NewTxManager(pool, cfg.DatabaseQueryTimeout)
-	service := trip.NewService(repository, txManager)
-	handler := httpapi.NewHandler(service, pool, cfg.DatabaseQueryTimeout)
-
-	server := &http.Server{
-		Addr: cfg.HTTPAddr,
-		Handler: api.HandlerWithOptions(handler, api.ChiServerOptions{
-			ErrorHandlerFunc: httpapi.HandleAPIError,
-		}),
-		ReadTimeout:       cfg.HTTPReadTimeout,
-		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
-		WriteTimeout:      cfg.HTTPWriteTimeout,
-		IdleTimeout:       cfg.HTTPIdleTimeout,
+		return fmt.Errorf("start application: %w", err)
 	}
 
 	stopCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -51,32 +40,42 @@ func main() {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		log.Printf("HTTP server started on %s", cfg.HTTPAddr)
-		serverErr <- server.ListenAndServe()
+		serverErr <- app.Server.ListenAndServe()
 	}()
 
+	app.Logger.InfoContext(stopCtx, "server started", "addr", cfg.HTTPAddr)
+
+	var listenErr error
 	select {
 	case <-stopCtx.Done():
-		log.Println("stopping HTTP server")
+		app.Logger.Info("server stopping")
 	case err := <-serverErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("HTTP server error: %v", err)
+			listenErr = fmt.Errorf("HTTP server: %w", err)
 		}
 	}
 
 	watchdog := time.AfterFunc(cfg.ShutdownTimeout, func() {
-		log.Println("shutdown timeout exceeded; forcing process exit")
+		app.Logger.Error("shutdown timeout exceeded; forcing process exit")
 		os.Exit(1)
 	})
+	defer watchdog.Stop()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown error: %v", err)
-		_ = server.Close()
-	}
-	cancel()
+	defer cancel()
 
-	pool.Close()
-	watchdog.Stop()
-	log.Println("HTTP server stopped")
+	var shutdownErr error
+	if err := app.Server.Shutdown(shutdownCtx); err != nil {
+		app.Logger.ErrorContext(shutdownCtx, "HTTP shutdown failed", "error", err)
+		_ = app.Server.Close()
+		shutdownErr = fmt.Errorf("HTTP shutdown: %w", err)
+	}
+
+	closeErr := app.Close(shutdownCtx)
+	if closeErr != nil {
+		app.Logger.ErrorContext(shutdownCtx, "resource shutdown failed", "error", closeErr)
+	}
+	app.Logger.Info("server stopped")
+
+	return errors.Join(listenErr, shutdownErr, closeErr)
 }
