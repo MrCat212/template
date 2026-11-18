@@ -17,7 +17,7 @@ import (
 
 type finderFunc func(context.Context, time.Duration) ([]trip.StaleTrip, error)
 
-func (f finderFunc) FindStaleTrips(ctx context.Context, d time.Duration) ([]trip.StaleTrip, error) {
+func (f finderFunc) FindStaleTripsBatch(ctx context.Context, d time.Duration, _ int, _ *trip.StaleCursor) ([]trip.StaleTrip, error) {
 	return f(ctx, d)
 }
 
@@ -38,7 +38,7 @@ func (t *manualTicker) Chan() <-chan time.Time { return t.ticks }
 func (t *manualTicker) Stop()                  { t.once.Do(func() { close(t.stopped) }) }
 
 func testConfig() Config {
-	return Config{CheckInterval: time.Hour, StaleAfter: time.Minute, Workers: 1, QueueSize: 2, RequestTimeout: time.Second}
+	return Config{CheckInterval: time.Hour, StaleAfter: time.Minute, Workers: 1, QueueSize: 2, ScanBatchSize: 100, RequestTimeout: time.Second}
 }
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -170,8 +170,8 @@ func TestQueueFullDrops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := trip.StaleTrip{ID: uuid.New()}
-	second := trip.StaleTrip{ID: uuid.New()}
+	first := trip.StaleTrip{ID: uuid.New(), LastActivityAt: time.Now().Add(-time.Hour)}
+	second := trip.StaleTrip{ID: uuid.New(), LastActivityAt: time.Now()}
 	if got := p.enqueue(context.Background(), first); got != resultQueued {
 		t.Fatal(got)
 	}

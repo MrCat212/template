@@ -72,6 +72,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 			StaleAfter:     cfg.PositionStaleAfter,
 			Workers:        cfg.PositionWorkers,
 			QueueSize:      cfg.PositionQueueSize,
+			ScanBatchSize:  cfg.PositionScanBatchSize,
 			RequestTimeout: cfg.PushRequestTimeout,
 		},
 		nil, // real time.Ticker; tests can inject a manual ticker

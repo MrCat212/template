@@ -26,6 +26,7 @@ func TestPositionMetricInstruments(t *testing.T) {
 
 	metrics.recordEnqueue(ctx, resultQueued)
 	metrics.recordEnqueue(ctx, resultDropped)
+	metrics.recordRowsRead(ctx, 150)
 	metrics.queueSize.Add(ctx, 1)
 	metrics.workersActive.Add(ctx, 1)
 	metrics.recordRequest(ctx, "success", time.Millisecond)
@@ -43,6 +44,7 @@ func TestPositionMetricInstruments(t *testing.T) {
 	}
 	for _, name := range []string{
 		"tripgo.stale_checks",
+		"tripgo.stale_checks.rows_read",
 		"tripgo.position_requests.queue.size",
 		"tripgo.position_requests.workers.active",
 		"tripgo.position_requests",

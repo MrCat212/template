@@ -27,6 +27,7 @@ type Config struct {
 	PositionStaleAfter    time.Duration
 	PositionWorkers       int
 	PositionQueueSize     int
+	PositionScanBatchSize int
 	PushHTTPURL           string
 	PushRequestTimeout    time.Duration
 }
@@ -116,6 +117,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.PositionQueueSize, err = positiveInt("POSITION_QUEUE_SIZE", "100")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PositionScanBatchSize, err = positiveInt("POSITION_SCAN_BATCH_SIZE", "100")
 	if err != nil {
 		return Config{}, err
 	}

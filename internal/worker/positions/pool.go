@@ -1,6 +1,8 @@
 package positions
 
 import (
+	"bytes"
+	"container/heap"
 	"context"
 	"fmt"
 	"log/slog"
@@ -19,6 +21,7 @@ const (
 	resultQueued    = "queued"
 	resultDuplicate = "duplicate"
 	resultDropped   = "dropped"
+	resultReplaced  = "replaced" // internal status, never exported as a metric label
 )
 
 // Config determines how often to scan and how many requests run concurrently.
@@ -27,11 +30,12 @@ type Config struct {
 	StaleAfter     time.Duration
 	Workers        int
 	QueueSize      int
+	ScanBatchSize  int
 	RequestTimeout time.Duration
 }
 
 type tripFinder interface {
-	FindStaleTrips(context.Context, time.Duration) ([]trip.StaleTrip, error)
+	FindStaleTripsBatch(context.Context, time.Duration, int, *trip.StaleCursor) ([]trip.StaleTrip, error)
 }
 
 type positionRequester interface {
@@ -55,8 +59,52 @@ type task struct {
 	link    trace.SpanContext
 }
 
+// queuedTask tracks its index so Cancel can remove a buffered job in O(log n).
+type queuedTask struct {
+	job   task
+	index int
+}
+
+// priorityQueue is a min-heap: the oldest last activity wins.
+// For equal timestamps, UUID gives a deterministic order (like the SQL query).
+type priorityQueue []*queuedTask
+
+func (q priorityQueue) Len() int { return len(q) }
+
+func older(a, b task) bool {
+	if a.trip.LastActivityAt.Equal(b.trip.LastActivityAt) {
+		return bytes.Compare(a.trip.ID[:], b.trip.ID[:]) < 0
+	}
+	return a.trip.LastActivityAt.Before(b.trip.LastActivityAt)
+}
+
+func (q priorityQueue) Less(i, j int) bool { return older(q[i].job, q[j].job) }
+
+func (q priorityQueue) Swap(i, j int) {
+	q[i], q[j] = q[j], q[i]
+	q[i].index = i
+	q[j].index = j
+}
+
+func (q *priorityQueue) Push(value any) {
+	item := value.(*queuedTask)
+	item.index = len(*q)
+	*q = append(*q, item)
+}
+
+func (q *priorityQueue) Pop() any {
+	old := *q
+	last := len(old) - 1
+	item := old[last]
+	old[last] = nil
+	item.index = -1
+	*q = old[:last]
+	return item
+}
+
 type pendingTask struct {
 	version uint64
+	queued  *queuedTask // nil after a worker takes the job
 	cancel  context.CancelFunc
 }
 
@@ -69,8 +117,10 @@ type Pool struct {
 	cfg       Config
 	ticker    Ticker
 
-	queue       chan task
+	queue       priorityQueue
 	mu          sync.Mutex
+	queueCond   *sync.Cond
+	queueClosed bool
 	pending     map[uuid.UUID]*pendingTask
 	nextVersion uint64
 
@@ -89,7 +139,7 @@ func New(finder tripFinder, requester positionRequester, logger *slog.Logger, cf
 	if finder == nil || requester == nil {
 		return nil, fmt.Errorf("position finder and requester must be non-nil")
 	}
-	if cfg.CheckInterval <= 0 || cfg.StaleAfter <= 0 || cfg.RequestTimeout <= 0 || cfg.Workers <= 0 || cfg.QueueSize <= 0 {
+	if cfg.CheckInterval <= 0 || cfg.StaleAfter <= 0 || cfg.RequestTimeout <= 0 || cfg.Workers <= 0 || cfg.QueueSize <= 0 || cfg.ScanBatchSize <= 0 {
 		return nil, fmt.Errorf("invalid position worker configuration")
 	}
 	if logger == nil {
@@ -99,12 +149,15 @@ func New(finder tripFinder, requester positionRequester, logger *slog.Logger, cf
 	if err != nil {
 		return nil, err
 	}
-	return &Pool{
+	p := &Pool{
 		finder: finder, requester: requester, logger: logger, metrics: metrics, cfg: cfg, ticker: ticker,
-		queue:       make(chan task, cfg.QueueSize),
+		queue:       make(priorityQueue, 0, cfg.QueueSize),
 		pending:     make(map[uuid.UUID]*pendingTask),
 		scannerDone: make(chan struct{}), stopped: make(chan struct{}),
-	}, nil
+	}
+	p.queueCond = sync.NewCond(&p.mu)
+	heap.Init(&p.queue)
+	return p, nil
 }
 
 // Start launches a single scanner and exactly cfg.Workers worker goroutines.
@@ -145,46 +198,101 @@ func (p *Pool) scanOnce(ctx context.Context) {
 	ctx, span := otel.Tracer("trip-service.worker.positions").Start(ctx, "positions.scan")
 	defer span.End()
 
-	items, err := p.finder.FindStaleTrips(ctx, p.cfg.StaleAfter)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		p.logger.ErrorContext(ctx, "scan stale trips", "error", err)
-		return
-	}
+	rowsRead := 0
+	defer func() { p.metrics.recordRowsRead(ctx, rowsRead) }()
 
-	for _, item := range items {
-		result := p.enqueue(ctx, item)
-		p.metrics.recordEnqueue(ctx, result)
-		if result == resultDropped {
-			p.logger.WarnContext(ctx, "position queue full; dropping task", "trip_id", item.ID.String())
+	var cursor *trip.StaleCursor
+	for {
+		if ctx.Err() != nil {
+			return
 		}
+
+		items, err := p.finder.FindStaleTripsBatch(ctx, p.cfg.StaleAfter, p.cfg.ScanBatchSize, cursor)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			p.logger.ErrorContext(ctx, "scan stale trips", "error", err)
+			return
+		}
+		rowsRead += len(items)
+
+		for _, item := range items {
+			if ctx.Err() != nil {
+				return
+			}
+			result := p.enqueue(ctx, item)
+			if result == resultReplaced {
+				// The older trip was accepted, but a newer queued trip was evicted.
+				// The first dropped task ends this scan, including eviction.
+				p.metrics.recordEnqueue(ctx, resultQueued)
+				p.metrics.recordEnqueue(ctx, resultDropped)
+				return
+			}
+			p.metrics.recordEnqueue(ctx, result)
+			if result == resultDropped {
+				p.logger.WarnContext(ctx, "position queue full; dropping task", "trip_id", item.ID.String())
+				return
+			}
+		}
+
+		if len(items) < p.cfg.ScanBatchSize {
+			return
+		}
+
+		last := items[len(items)-1]
+		cursor = &trip.StaleCursor{LastActivityAt: last.LastActivityAt, ID: last.ID}
 	}
 }
 
-// enqueue never blocks, even when all workers are busy.
+// enqueue never waits for a worker. On overflow, an older trip displaces
+// the *newest* buffered trip; the in-progress requests cannot be evicted.
 func (p *Pool) enqueue(ctx context.Context, item trip.StaleTrip) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.queueClosed {
+		return resultDropped
+	}
 	if _, exists := p.pending[item.ID]; exists {
 		return resultDuplicate
 	}
 
 	p.nextVersion++
 	job := task{trip: item, version: p.nextVersion, link: trace.SpanContextFromContext(ctx)}
-	select {
-	case p.queue <- job:
-		p.pending[item.ID] = &pendingTask{version: job.version}
+	entry := &queuedTask{job: job}
+
+	if p.queue.Len() < p.cfg.QueueSize {
+		heap.Push(&p.queue, entry)
+		p.pending[item.ID] = &pendingTask{version: job.version, queued: entry}
 		p.metrics.queueSize.Add(ctx, 1)
+		p.queueCond.Signal()
 		return resultQueued
-	default:
+	}
+
+	// Heap root is oldest; find its opposite (the newest) in O(queue size).
+	// The bounded queue makes this scan finite, with no task goroutines.
+	newest := 0
+	for i := 1; i < p.queue.Len(); i++ {
+		if older(p.queue[newest].job, p.queue[i].job) {
+			newest = i
+		}
+	}
+	if !older(job, p.queue[newest].job) {
 		return resultDropped
 	}
+
+	evicted := heap.Remove(&p.queue, newest).(*queuedTask)
+	delete(p.pending, evicted.job.trip.ID)
+	heap.Push(&p.queue, entry)
+	p.pending[item.ID] = &pendingTask{version: job.version, queued: entry}
+	// Queue length did not change: do not modify the size gauge.
+	p.logger.WarnContext(ctx, "position queue full; evicted newer task",
+		"trip_id", evicted.job.trip.ID.String(), "replacement_trip_id", item.ID.String())
+	p.queueCond.Signal()
+	return resultReplaced
 }
 
-// Cancel invalidates queued requests. Buffered tasks are skipped by workers.
-// If a request has already started, its context is canceled too.
+// Cancel physically removes queued jobs; running jobs get context cancellation.
 func (p *Pool) Cancel(tripID uuid.UUID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -193,24 +301,53 @@ func (p *Pool) Cancel(tripID uuid.UUID) {
 		return
 	}
 	delete(p.pending, tripID)
+	if entry.queued != nil {
+		heap.Remove(&p.queue, entry.queued.index)
+		p.metrics.queueSize.Add(context.Background(), -1)
+		p.metrics.recordQueuedCancelled(context.Background())
+		return
+	}
 	if entry.cancel != nil {
 		entry.cancel()
 	} else {
-		// No HTTP request has started: account for the skipped queued task.
+		// The worker dequeued this job but has not yet started HTTP.
 		p.metrics.recordQueuedCancelled(context.Background())
 	}
 }
 
+// take sleeps on a condition variable while the queue is empty.
+// The scanner/HTTP handlers only signal under the same mutex.
+func (p *Pool) take() (task, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for p.queue.Len() == 0 && !p.queueClosed && p.workerCtx.Err() == nil {
+		p.queueCond.Wait()
+	}
+	if p.workerCtx.Err() != nil || p.queue.Len() == 0 {
+		return task{}, false
+	}
+	entry := heap.Pop(&p.queue).(*queuedTask)
+	if pending, ok := p.pending[entry.job.trip.ID]; ok && pending.version == entry.job.version {
+		pending.queued = nil
+	}
+	p.metrics.queueSize.Add(p.workerCtx, -1)
+	return entry.job, true
+}
+
 func (p *Pool) worker() {
 	defer p.workers.Done()
-	for job := range p.queue {
+	for {
+		job, ok := p.take()
+		if !ok {
+			return
+		}
 		p.process(job)
 	}
 }
 
 func (p *Pool) process(job task) {
 	p.mu.Lock()
-	p.metrics.queueSize.Add(p.workerCtx, -1)
 	entry, exists := p.pending[job.trip.ID]
 	if !exists || entry.version != job.version {
 		p.mu.Unlock()
@@ -268,7 +405,10 @@ func (p *Pool) Stop(ctx context.Context) error {
 		}
 		p.scannerCancel()
 		<-p.scannerDone
-		close(p.queue)
+		p.mu.Lock()
+		p.queueClosed = true
+		p.queueCond.Broadcast()
+		p.mu.Unlock()
 		go func() {
 			p.workers.Wait()
 			p.workerCancel()

@@ -12,6 +12,7 @@ import (
 
 type poolMetrics struct {
 	staleChecks     metric.Int64Counter
+	rowsRead        metric.Int64Histogram
 	queueSize       metric.Int64UpDownCounter
 	workersActive   metric.Int64UpDownCounter
 	requests        metric.Int64Counter
@@ -29,6 +30,10 @@ func newPoolMetricsWithMeter(meter metric.Meter) (*poolMetrics, error) {
 	m.staleChecks, err = meter.Int64Counter("tripgo.stale_checks", metric.WithUnit("{check}"))
 	if err != nil {
 		return nil, fmt.Errorf("create stale check counter: %w", err)
+	}
+	m.rowsRead, err = meter.Int64Histogram("tripgo.stale_checks.rows_read", metric.WithUnit("{row}"))
+	if err != nil {
+		return nil, fmt.Errorf("create stale scan rows histogram: %w", err)
 	}
 	m.queueSize, err = meter.Int64UpDownCounter("tripgo.position_requests.queue.size", metric.WithUnit("{task}"))
 	if err != nil {
@@ -67,4 +72,9 @@ func (m *poolMetrics) recordRequest(ctx context.Context, result string, elapsed 
 // No Push Service request was made, so no request-duration observation is recorded.
 func (m *poolMetrics) recordQueuedCancelled(ctx context.Context) {
 	m.requests.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "cancelled")))
+}
+
+// recordRowsRead observes how many database rows the scanner fetched on a tick.
+func (m *poolMetrics) recordRowsRead(ctx context.Context, count int) {
+	m.rowsRead.Record(ctx, int64(count))
 }
